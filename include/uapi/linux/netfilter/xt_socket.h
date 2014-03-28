@@ -26,4 +26,6 @@ struct xt_socket_mtinfo3 {
 			   | XT_SOCKET_NOWILDCARD \
 			   | XT_SOCKET_RESTORESKMARK)
 
+void xt_socket_put_sk(struct sock *sk);
+
 #endif /* _XT_SOCKET_H */
