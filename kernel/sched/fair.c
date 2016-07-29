@@ -5593,7 +5593,7 @@ static inline bool cpu_in_sg(struct sched_group *sg, int cpu)
  * utilization is removed from or added to the system (e.g. task wake-up). If
  * both are specified, the utilization is migrated.
  */
-static int energy_diff(struct energy_env *eenv)
+static inline int __energy_diff(struct energy_env *eenv)
 {
 	struct sched_domain *sd;
 	struct sched_group *sg;
@@ -5632,6 +5632,82 @@ static int energy_diff(struct energy_env *eenv)
 
 	return energy_after-energy_before;
 }
+
+#ifdef CONFIG_SCHED_TUNE
+
+struct target_nrg schedtune_target_nrg;
+
+/*
+ * System energy normalization
+ * Returns the normalized value, in the range [0..SCHED_LOAD_SCALE],
+ * corresponding to the specified energy variation.
+ */
+static inline int
+normalize_energy(int energy_diff)
+{
+	u32 normalized_nrg;
+#ifdef CONFIG_SCHED_DEBUG
+	int max_delta;
+
+	/* Check for boundaries */
+	max_delta  = schedtune_target_nrg.max_power;
+	max_delta -= schedtune_target_nrg.min_power;
+	WARN_ON(abs(energy_diff) >= max_delta);
+#endif
+
+	/* Do scaling using positive numbers to increase the range */
+	normalized_nrg = (energy_diff < 0) ? -energy_diff : energy_diff;
+
+	/* Scale by energy magnitude */
+	normalized_nrg <<= SCHED_CAPACITY_SHIFT;
+
+	/* Normalize on max energy for target platform */
+	normalized_nrg = reciprocal_divide(
+			normalized_nrg, schedtune_target_nrg.rdiv);
+
+	return (energy_diff < 0) ? -normalized_nrg : normalized_nrg;
+}
+
+static inline int
+energy_diff(struct energy_env *eenv)
+{
+	unsigned int boost;
+	int nrg_delta;
+
+	/* Conpute "absolute" energy diff */
+	__energy_diff(eenv);
+
+	/* Return energy diff when boost margin is 0 */
+#ifdef CONFIG_CGROUP_SCHEDTUNE
+	boost = schedtune_task_boost(eenv->task);
+#else
+	boost = get_sysctl_sched_cfs_boost();
+#endif
+	if (boost == 0)
+		return eenv->nrg.diff;
+
+	/* Compute normalized energy diff */
+	nrg_delta = normalize_energy(eenv->nrg.diff);
+	eenv->nrg.delta = nrg_delta;
+
+	eenv->payoff = schedtune_accept_deltas(
+			eenv->nrg.delta,
+			eenv->cap.delta,
+			eenv->task);
+
+	/*
+	 * When SchedTune is enabled, the energy_diff() function will return
+	 * the computed energy payoff value. Since the energy_diff() return
+	 * value is expected to be negative by its callers, this evaluation
+	 * function return a negative value each time the evaluation return a
+	 * positive payoff, which is the condition for the acceptance of
+	 * a scheduling decision
+	 */
+	return -eenv->payoff;
+}
+#else /* CONFIG_SCHED_TUNE */
+#define energy_diff(eenv) __energy_diff(eenv)
+#endif
 
 /*
  * Detect M:N waker/wakee relationships via a switching-frequency heuristic.
