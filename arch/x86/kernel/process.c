@@ -68,6 +68,20 @@ EXPORT_PER_CPU_SYMBOL(cpu_tss);
 DEFINE_PER_CPU(bool, need_tr_refresh);
 EXPORT_PER_CPU_SYMBOL_GPL(need_tr_refresh);
 
+static ATOMIC_NOTIFIER_HEAD(idle_notifier);
+
+void idle_notifier_register(struct notifier_block *n)
+{
+	atomic_notifier_chain_register(&idle_notifier, n);
+}
+EXPORT_SYMBOL_GPL(idle_notifier_register);
+
+void idle_notifier_unregister(struct notifier_block *n)
+{
+	atomic_notifier_chain_unregister(&idle_notifier, n);
+}
+EXPORT_SYMBOL_GPL(idle_notifier_unregister);
+
 /*
  * this gets called so that we can store lazy state into memory and copy the
  * current task into the new thread.
